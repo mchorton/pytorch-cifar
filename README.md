@@ -30,3 +30,21 @@ I manually change the `lr` during training:
 - `0.001` for epoch `[250,350)`
 
 Resume the training with `python main.py --resume --lr=0.01`
+
+## Run Notes
+Train the code using:
+
+`python main.py`
+
+Test the code on the GPU using:
+
+`python main.py -t -r`
+
+Test the code on the CPU using:
+
+`python main.py -t -r -d`
+
+When testing the CPU code, note that the GPU may be used to load part of the
+CUDA model before work is handed to the GPU. Be sure not to count this as part
+of the power used during training. (The amount of time over which this power
+usage occurs is small compared to the test time of running on CPU).
