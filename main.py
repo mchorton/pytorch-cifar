@@ -17,6 +17,8 @@ from models import *
 from utils import progress_bar
 from torch.autograd import Variable
 
+def ckpt_name(namehint):
+    return "./checkpoint/%s_ckpt.t7" % namehint
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -27,6 +29,8 @@ parser.add_argument(
 parser.add_argument(
         '--disablecuda', '-d', action='store_true',
         help='resume from checkpoint')
+parser.add_argument(
+        '--net', '-n', default="resnet18", help='resume from checkpoint')
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available() and (not args.disablecuda)
@@ -60,18 +64,22 @@ if args.resume:
     # Load checkpoint.
     print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt.t7')
+    checkpoint = torch.load(ckpt_name(args.net))
     net = checkpoint['net']
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 else:
     print('==> Building model..')
-    # net = VGG('VGG19')
-    net = ResNet18()
-    # net = GoogLeNet()
-    # net = DenseNet121()
-    # net = ResNeXt29_2x64d()
-    # net = MobileNet()
+    netmap = {
+            "resnet18": ResNet18,
+            "googlenet": GoogLeNet,
+            "densenet121": DenseNet121,
+            "resnext29_2x64d": ResNeXt29_2x64d,
+            "mobilenet": MobileNet}
+    if args.net == "vgg":
+        net = VGG('VGG19')
+    else:
+        net = netmap[args.net]()
 
 if use_cuda:
     net.cuda()
@@ -141,7 +149,7 @@ def test(epoch, **kwargs):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt.t7')
+        torch.save(state, ckpt_name(args.net))
         best_acc = acc
 
 if args.testonly:
