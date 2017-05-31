@@ -12,6 +12,7 @@ import torchvision.transforms as transforms
 
 import os
 import argparse
+import time
 
 from models import *
 from utils import progress_bar
@@ -28,14 +29,24 @@ parser.add_argument(
         help='run inference instead of training')
 parser.add_argument(
         '--disablecuda', '-d', action='store_true',
-        help='resume from checkpoint')
+        help='do not use CUDA and GPUs; run on CPU only')
 parser.add_argument(
         '--net', '-n', default="resnet18", help='resume from checkpoint')
+parser.add_argument(
+        '--gpus', '-g', default=-1, type=long,
+        help='if using gpus, how many to use (-1 = detect number and use all')
+parser.add_argument(
+        '--split', '-s', default='test', type=str,
+        help='the split to when testing: "train" or "test"')
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available() and (not args.disablecuda)
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+
+# Timing: data loading
+raw_input('Press enter to start DATA loading...')
+dataload_start = time.time()
 
 # Data
 print('==> Preparing data..')
@@ -58,6 +69,11 @@ testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=Fals
 testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+
+# Timing: finish data loading and start model loading (this is probably auxillary)
+dataload_end = time.time()
+raw_input('DATA loading finished. Press enter to start MODEL loading...')
+modelload_start = time.time()
 
 # Model
 if args.resume:
@@ -83,14 +99,29 @@ else:
 
 if use_cuda:
     net.cuda()
-    net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
+    max_gpus = torch.cuda.device_count()
+    # NOTE: This kind of checking should be done at argparse time, but
+    # whatever...
+    assert args.gpus != 0 and args.gpus <= max_gpus, 'Error: Cannot use 0' \
+        ' GPUs or more than the device has (%d)' % (max_gpus,)
+    # Spec says -1 means detect; we just detect with anything < 0.
+    if args.gpus < 0:
+        n_gpus = max_gpus
+    else:
+        n_gpus = args.gpus
+    net = torch.nn.DataParallel(net, device_ids=range(n_gpus))
     cudnn.benchmark = True
 
 if args.disablecuda:
+    n_gpus = 0  # for consistency in reporting
     net.cpu()
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+
+# Timing: model finished loading
+modelload_end = time.time()
+raw_input('MODEL loading finished. Press enter to continue...')
 
 # Training
 def train(epoch):
@@ -123,23 +154,84 @@ def test(epoch, **kwargs):
     test_loss = 0
     correct = 0
     total = 0
-    for batch_idx, (inputs, targets) in enumerate(testloader):
+
+    raw_input('Press enter to start BUILD NET...')
+    buildnet_start = time.time()
+    # print('---> START [overall]')
+
+    # NOTE: This kind of checking should be done at argparse time, but
+    # whatever...
+    assert args.split in ['train', 'test'], 'Error: split must be "train" or '\
+        '"test". Got: %s' % (args.split,)
+    if args.split == 'train':
+        loader, split = trainloader, 'train'
+    else:
+        loader, split = testloader, 'test'
+
+    for batch_idx, (inputs, targets) in enumerate(loader):
+    # for batch_idx, (inputs, targets) in enumerate(trainloader):
+        # if batch_idx == 0:
+        #     print('---> inputs/targets.cuda()')
         if use_cuda:
             inputs, targets = inputs.cuda(), targets.cuda()
         inputs, targets = Variable(inputs, volatile=True), Variable(targets)
+
+        # if batch_idx == 0:
+        #     print('---> outputs = net(inputs)')
         outputs = net(inputs)
+        if batch_idx == 0:
+            # print('---> START [inference]')
+            buildnet_end = time.time()
+            raw_input('BUILD NET. Finished. Press enter to start INFERENCE...')
+            inference_start = time.time()
+        # if batch_idx == 0:
+        #     print('---> loss = criterion(...)')
         loss = criterion(outputs, targets)
 
+        # if batch_idx == 0:
+        #     print('---> (computing loss)')
         test_loss += loss.data[0]
         _, predicted = torch.max(outputs.data, 1)
         total += targets.size(0)
         correct += predicted.eq(targets.data).cpu().sum()
 
-        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        # progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+        #     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+    inference_end = time.time()
+    print('INFERENCE finished.')
+    # print('---> FINISH')
+    acc = 100.*correct/total
+
+    # Compute output
+    mode = 'gpu' if use_cuda else 'cpu'
+    dataload_duration = dataload_end - dataload_start
+    modelload_duration = modelload_end - modelload_start
+    buildnet_duration = buildnet_end - buildnet_start
+    inference_duration = inference_end - inference_start
+
+    # More-human-readable output
+    print('Split: ', split)
+    print('Accuracy: ', acc)
+    print('Timing breakdown:')
+    print('  - %0.6f -- loading data' % (dataload_duration))
+    print('  - %0.6f -- loading model' % (modelload_duration))
+    print('  - %0.6f -- building net' % (buildnet_duration))
+    print('  - %0.6f -- inference' % (inference_duration))
+
+    # csv output
+    print('split,mode,n-gpus,loading-data,loading-model,building-net,inference')
+    print('%s,%s,%d,%0.6f,%0.6f,%0.6f,%0.6f' % (
+        split,
+        mode,
+        n_gpus,
+        dataload_duration,
+        modelload_duration,
+        buildnet_duration,
+        inference_duration,
+    ))
 
     # Save checkpoint.
-    acc = 100.*correct/total
     if kwargs["save"] and acc > best_acc:
         print('Saving..')
         state = {
