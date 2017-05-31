@@ -38,6 +38,9 @@ parser.add_argument(
 parser.add_argument(
         '--split', '-s', default='test', type=str,
         help='the split to when testing: "train" or "test"')
+parser.add_argument(
+        '--wait', '-w', action='store_true',
+        help='whether to wait for key-presses before each stage of running')
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available() and (not args.disablecuda)
@@ -45,7 +48,8 @@ best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
 # Timing: data loading
-raw_input('Press enter to start DATA loading...')
+if args.wait:
+    raw_input('Press enter to start DATA loading...')
 dataload_start = time.time()
 
 # Data
@@ -72,7 +76,8 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 
 # Timing: finish data loading and start model loading (this is probably auxillary)
 dataload_end = time.time()
-raw_input('DATA loading finished. Press enter to start MODEL loading...')
+if args.wait:
+    raw_input('DATA loading finished. Press enter to start MODEL loading...')
 modelload_start = time.time()
 
 # Model
@@ -121,7 +126,8 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5
 
 # Timing: model finished loading
 modelload_end = time.time()
-raw_input('MODEL loading finished. Press enter to continue...')
+if args.wait:
+    raw_input('MODEL loading finished. Press enter to continue...')
 
 # Training
 def train(epoch):
@@ -155,7 +161,8 @@ def test(epoch, **kwargs):
     correct = 0
     total = 0
 
-    raw_input('Press enter to start BUILD NET...')
+    if args.wait:
+        raw_input('Press enter to start BUILD NET...')
     buildnet_start = time.time()
     # print('---> START [overall]')
 
@@ -182,7 +189,8 @@ def test(epoch, **kwargs):
         if batch_idx == 0:
             # print('---> START [inference]')
             buildnet_end = time.time()
-            raw_input('BUILD NET. Finished. Press enter to start INFERENCE...')
+            if args.wait:
+                raw_input('BUILD NET. Finished. Press enter to start INFERENCE...')
             inference_start = time.time()
         # if batch_idx == 0:
         #     print('---> loss = criterion(...)')
@@ -199,7 +207,8 @@ def test(epoch, **kwargs):
         #     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
     inference_end = time.time()
-    print('INFERENCE finished.')
+    if args.wait:
+        print('INFERENCE finished.')
     # print('---> FINISH')
     acc = 100.*correct/total
 
@@ -211,13 +220,17 @@ def test(epoch, **kwargs):
     inference_duration = inference_end - inference_start
 
     # More-human-readable output
-    print('Split: ', split)
+    print()
+    print('Split:    ', split)
+    print('Mode:     ', mode)
+    print('GPUs used:', n_gpus)
     print('Accuracy: ', acc)
     print('Timing breakdown:')
     print('  - %0.6f -- loading data' % (dataload_duration))
     print('  - %0.6f -- loading model' % (modelload_duration))
     print('  - %0.6f -- building net' % (buildnet_duration))
     print('  - %0.6f -- inference' % (inference_duration))
+    print()
 
     # csv output
     print('split,mode,n-gpus,loading-data,loading-model,building-net,inference')
@@ -230,6 +243,7 @@ def test(epoch, **kwargs):
         buildnet_duration,
         inference_duration,
     ))
+    print()
 
     # Save checkpoint.
     if kwargs["save"] and acc > best_acc:
